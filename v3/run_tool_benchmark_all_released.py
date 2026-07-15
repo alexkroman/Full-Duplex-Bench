@@ -98,7 +98,12 @@ def main():
                         help="Model provider (gpt_realtime, grok, gemini2_5, gemini3_1, ultravox, cascaded, aai)")
     parser.add_argument("--force", action="store_true", help="Overwrite existing results")
     parser.add_argument("--asr-only", action="store_true", help="Skip inference, only run ASR")
+    parser.add_argument("--asr-backend", type=str, default=None, choices=["parakeet", "whisper"],
+                        help="ASR backend (default: parakeet, or ASR_BACKEND env var)")
     args = parser.parse_args()
+
+    if args.asr_backend:
+        os.environ["ASR_BACKEND"] = args.asr_backend
 
     root_dir = Path(args.root_dir)
     if not root_dir.exists():

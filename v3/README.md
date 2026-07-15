@@ -68,6 +68,9 @@ pip install "livekit[crypto]~=1.0" numpy
 
 # ASR model for transcription
 pip install nemo_toolkit[asr]
+# ...or, if the NeMo/torch stack is hard to install on your machine (e.g. macOS),
+# use the whisper fallback instead and run inference with --asr-backend whisper:
+# pip install openai-whisper
 
 # Audio processing
 pip install pydub ffmpeg-python

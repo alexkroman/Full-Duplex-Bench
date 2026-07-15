@@ -126,18 +126,56 @@ def discover_inputs(root_dir=None):
 # ==============================================================================
 
 def load_asr_model():
-    """Load NeMo ASR model."""
+    """Load the ASR model.
+
+    Default backend is NeMo parakeet (used for the paper's numbers). Set
+    ASR_BACKEND=whisper (with `pip install openai-whisper`) as a fallback on
+    machines where the NeMo/torch stack is hard to install — word timestamps
+    are supported either way, but transcripts will come from a different
+    model than the published results.
+    """
+    backend = os.getenv("ASR_BACKEND", "parakeet").lower()
+    if backend == "whisper":
+        import whisper
+        model_name = os.getenv("WHISPER_MODEL", "small.en")
+        print(f"🔊 Loading whisper ASR model ({model_name})...")
+        model = whisper.load_model(model_name)
+        print("✅ ASR model loaded (whisper)")
+        return {"backend": "whisper", "model": model}
+
     print("🔊 Loading ASR model...")
     import nemo.collections.asr as nemo_asr
     model = nemo_asr.models.ASRModel.from_pretrained(model_name=ASR_MODEL_NAME)
     if hasattr(model, 'cuda'):
-        model = model.cuda()
+        import torch
+        if torch.cuda.is_available():
+            model = model.cuda()
     print("✅ ASR model loaded")
     return model
 
 
 def run_asr(asr_model, audio_path):
     """Run ASR on an audio file and return transcript."""
+    if isinstance(asr_model, dict) and asr_model.get("backend") == "whisper":
+        try:
+            result = asr_model["model"].transcribe(str(audio_path), word_timestamps=True)
+            text = ""
+            chunks = []
+            for seg in result.get("segments", []):
+                for w in seg.get("words", []):
+                    word = w["word"].strip()
+                    if not word:
+                        continue
+                    text += word + " "
+                    chunks.append({
+                        "text": word,
+                        "timestamp": [round(w["start"], 3), round(w["end"], 3)],
+                    })
+            return {"text": text.strip(), "chunks": chunks}
+        except Exception as e:
+            print(f"  ❌ ASR error: {e}")
+            return {"text": "", "chunks": [], "error": str(e)}
+
     try:
         outputs = asr_model.transcribe([str(audio_path)], timestamps=True)
         if not outputs:
@@ -485,7 +523,12 @@ def main():
     parser.add_argument("--asr-only", action="store_true",
                         help="Skip inference, only re-run ASR + evaluation on existing outputs")
     parser.add_argument("--force", action="store_true", help="Overwrite existing results")
+    parser.add_argument("--asr-backend", type=str, default=None, choices=["parakeet", "whisper"],
+                        help="ASR backend (default: parakeet, or ASR_BACKEND env var)")
     args = parser.parse_args()
+
+    if args.asr_backend:
+        os.environ["ASR_BACKEND"] = args.asr_backend
 
     # Determine provider
     provider = args.provider or os.getenv("LK_PROVIDER", "gpt_realtime")
