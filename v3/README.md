@@ -100,7 +100,7 @@ GOOGLE_API_KEY=...             # Gemini
 ULTRAVOX_API_KEY=...           # Ultravox
 
 # AAI voice-agent host WebSocket URL (local host mode, `aai` provider only)
-# AAI_WS_URL=ws://localhost:3000/websocket
+# AAI_WS_URL=ws://localhost:3100/websocket
 ```
 
 > **Note:** A [LiveKit Cloud](https://cloud.livekit.io) account (free tier available) is required to run inference — except for the `aai` provider, which connects directly to a local AAI voice-agent host over WebSocket and needs no LiveKit credentials. The evaluation scripts (Step 3 below) do **not** require LiveKit.
@@ -144,7 +144,7 @@ The `aai` provider benchmarks the [@alexkroman1/aai](https://www.npmjs.com/packa
 pip install websockets
 
 # 2. Start your AAI voice-agent host in a separate terminal
-#    (it should listen on ws://localhost:3000/websocket by default;
+#    (it should listen on ws://localhost:3100/websocket by default;
 #     set AAI_WS_URL in .env.local if it listens elsewhere)
 
 # 3. Run inference with --provider aai (Step 2 below)

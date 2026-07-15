@@ -31,7 +31,7 @@ Requirements:
     pip install websockets python-dotenv numpy
 
 Environment variables (in .env.local):
-    AAI_WS_URL       – WebSocket URL of the AAI host (default: ws://localhost:3000/websocket)
+    AAI_WS_URL       – WebSocket URL of the AAI host (default: ws://localhost:3100/websocket)
     AAI_GREETING     – optional greeting spoken by the host on session start
                        (default: disabled; a greeting would pollute the
                        latency/transcript measurements of this benchmark)
@@ -66,7 +66,7 @@ log = logging.getLogger("aai_host_inference")
 # Configuration
 # ---------------------------------------------------------------------------
 
-DEFAULT_AAI_WS_URL = "ws://localhost:3000/websocket"
+DEFAULT_AAI_WS_URL = "ws://localhost:3100/websocket"
 CONFIG_FRAME_TIMEOUT = 10.0  # seconds to await the config handshake frame
 
 SAMPLE_WIDTH = 2  # 16-bit PCM = 2 bytes per sample
