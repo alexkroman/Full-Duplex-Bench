@@ -95,7 +95,7 @@ def main():
     parser.add_argument("--root_dir", type=str, default="fdb_v3_data_released",
                         help="Root directory containing released example folders")
     parser.add_argument("--provider", type=str, default=os.getenv("LK_PROVIDER", "gpt_realtime"),
-                        help="Model provider (gpt_realtime, grok, gemini2_5, gemini3_1, ultravox, cascaded)")
+                        help="Model provider (gpt_realtime, grok, gemini2_5, gemini3_1, ultravox, cascaded, aai)")
     parser.add_argument("--force", action="store_true", help="Overwrite existing results")
     parser.add_argument("--asr-only", action="store_true", help="Skip inference, only run ASR")
     args = parser.parse_args()

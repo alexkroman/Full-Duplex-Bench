@@ -12,6 +12,7 @@ v3/
 ├── run_tool_benchmark_all_released.py   # Main inference pipeline (batch)
 ├── run_tool_benchmark.py                # Core inference functions (ASR, LiveKit, latency)
 ├── livekit_inference.py                 # Headless LiveKit client for streaming audio
+├── aai_host_inference.py                # Headless client for a local AAI voice-agent host (host mode)
 ├── lk_agent_tool.py                     # LiveKit voice agent (native realtime models)
 ├── cascaded_agent.py                    # Cascaded agent (STT + LLM + TTS pipeline)
 ├── mock_apis.py                         # Mock API backends for 12 tools
@@ -94,9 +95,12 @@ OPENAI_API_KEY=sk-...          # GPT Realtime / cascaded agent / evaluation LLM 
 XAI_API_KEY=...                # Grok
 GOOGLE_API_KEY=...             # Gemini
 ULTRAVOX_API_KEY=...           # Ultravox
+
+# AAI voice-agent host WebSocket URL (local host mode, `aai` provider only)
+# AAI_WS_URL=ws://localhost:3000/websocket
 ```
 
-> **Note:** A [LiveKit Cloud](https://cloud.livekit.io) account (free tier available) is required to run inference. The evaluation scripts (Step 3 below) do **not** require LiveKit.
+> **Note:** A [LiveKit Cloud](https://cloud.livekit.io) account (free tier available) is required to run inference — except for the `aai` provider, which connects directly to a local AAI voice-agent host over WebSocket and needs no LiveKit credentials. The evaluation scripts (Step 3 below) do **not** require LiveKit.
 
 ## Running Inference
 
@@ -128,6 +132,23 @@ cd v3
 python cascaded_agent.py start
 ```
 
+**Option C: AAI Voice-Agent Host** (local host mode — no LiveKit needed)
+
+The `aai` provider benchmarks the [@alexkroman1/aai](https://www.npmjs.com/package/@alexkroman1/aai) voice-agent framework (distinct from AssemblyAI's cloud API) running as a local host. Instead of an agent joining a LiveKit room, `aai_host_inference.py` connects directly to the host's WebSocket in host mode (`?host=1`), injects the benchmark system prompt and the 12 tool schemas via the config message, and relays the agent's tool calls back to the local mock API backend for execution.
+
+```bash
+# 1. Install the extra dependency for the aai provider
+pip install websockets
+
+# 2. Start your AAI voice-agent host in a separate terminal
+#    (it should listen on ws://localhost:3000/websocket by default;
+#     set AAI_WS_URL in .env.local if it listens elsewhere)
+
+# 3. Run inference with --provider aai (Step 2 below)
+```
+
+By default no greeting is configured, so the output window contains only the agent's response to the user query (a greeting would pollute the latency and transcript measurements). Set `AAI_GREETING="Thank you for calling..."` to enable one anyway.
+
 ### Step 2: Run Batch Inference
 
 In a **different terminal** (while the agent is running):
@@ -137,6 +158,9 @@ cd v3
 
 # Run inference for a specific provider
 python run_tool_benchmark_all_released.py --provider gpt_realtime
+
+# AAI host mode (requires a local AAI voice-agent host; see Option C above)
+python run_tool_benchmark_all_released.py --provider aai
 
 # With custom data directory
 python run_tool_benchmark_all_released.py --provider gemini2_5 --root_dir fdb_v3_data_released
@@ -160,6 +184,7 @@ This will process all 100 audio samples and save `result_{provider}.json` files 
 | Grok | `grok` | `lk_agent_tool.py` | Grok Voice Agent |
 | Ultravox | `ultravox` | `lk_agent_tool.py` | Ultravox Realtime |
 | Cascaded (STT+LLM+TTS) | `cascaded` | `cascaded_agent.py` | Whisper + gpt-4o + OpenAI TTS |
+| AAI voice-agent host | `aai` | `aai_host_inference.py` (direct WebSocket, no LiveKit) | host-defined |
 
 ## Running Evaluation
 
