@@ -411,6 +411,12 @@ async def run(input_wav: str, output_wav: str, room_name: str, latency_profile: 
         registry = None
 
     # ── Read input audio ──────────────────────────────────────────────
+    if not os.path.isfile(input_wav):
+        raise SystemExit(
+            f"❌ Input file not found: {input_wav}\n"
+            "   Expected layout: fdb_v3_data_released/{example_id}_{speaker_id}/input.wav\n"
+            "   List available examples with: ls fdb_v3_data_released"
+        )
     pcm_data = read_wav_pcm16(input_wav, INPUT_SAMPLE_RATE)
     total_samples = len(pcm_data) // SAMPLE_WIDTH
     duration_sec = total_samples / INPUT_SAMPLE_RATE
