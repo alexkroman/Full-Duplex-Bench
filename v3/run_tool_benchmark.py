@@ -11,6 +11,9 @@ For each input.wav:
   4. Run ASR on the output
   5. Measure response latency
 
+ASR / latency / LiveKit / search-verification helpers live in
+inference_helpers.py.
+
 Usage:
   conda activate fdb
 
@@ -41,6 +44,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(".env.local")
 
+from inference_helpers import (
+    load_asr_model,
+    run_asr,
+    measure_latency_from_audio,
+    run_livekit_inference,
+    verify_search_answer,
+)
+
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):
         import numpy as np
@@ -58,7 +69,6 @@ class NpEncoder(json.JSONEncoder):
 PROJECT_ROOT = Path(__file__).resolve().parent
 COLLECTED_AUDIO_DIR = PROJECT_ROOT / "fdb_v3_data_released"
 DATA_JSON_PATH = PROJECT_ROOT / "benchmark_data_v2.json"
-ASR_MODEL_NAME = "nvidia/parakeet-tdt-0.6b-v2"
 
 SEARCH_CATEGORIES = {"fast_search"}
 SAMPLE_RATE = 24000  # LiveKit default sample rate
@@ -119,157 +129,6 @@ def discover_inputs(root_dir=None):
                 inputs.append((speaker_id, example_id, input_path))
 
     return inputs
-
-
-# ==============================================================================
-# ASR
-# ==============================================================================
-
-def load_asr_model():
-    """Load NeMo ASR model."""
-    print("🔊 Loading ASR model...")
-    import nemo.collections.asr as nemo_asr
-    model = nemo_asr.models.ASRModel.from_pretrained(model_name=ASR_MODEL_NAME)
-    if hasattr(model, 'cuda'):
-        model = model.cuda()
-    print("✅ ASR model loaded")
-    return model
-
-
-def run_asr(asr_model, audio_path):
-    """Run ASR on an audio file and return transcript."""
-    try:
-        outputs = asr_model.transcribe([str(audio_path)], timestamps=True)
-        if not outputs:
-            return {"text": "", "chunks": []}
-
-        result = outputs[0]
-        chunks = []
-        text = ""
-
-        if hasattr(result, "timestamp") and "word" in result.timestamp:
-            for w in result.timestamp["word"]:
-                text += w["word"] + " "
-                chunks.append({
-                    "text": w["word"],
-                    "timestamp": [w["start"], w["end"]],
-                })
-        else:
-            if hasattr(result, 'text'):
-                text = result.text
-            elif isinstance(result, str):
-                text = result
-
-        return {"text": text.strip(), "chunks": chunks}
-    except Exception as e:
-        print(f"  ❌ ASR error: {e}")
-        return {"text": "", "chunks": [], "error": str(e)}
-
-
-# ==============================================================================
-# Latency Measurement
-# ==============================================================================
-
-def measure_latency_from_audio(input_path, output_path, silence_threshold_db=-40):
-    """Measure response latency:
-    Time from end of input audio to first non-silence in output audio.
-    Returns latency in seconds.
-    """
-    try:
-        from pydub import AudioSegment
-
-        input_audio = AudioSegment.from_file(str(input_path))
-        output_audio = AudioSegment.from_file(str(output_path))
-
-        input_duration_s = len(input_audio) / 1000.0
-        output_duration_s = len(output_audio) / 1000.0
-
-        # Find first non-silent chunk in output (check every 50ms)
-        chunk_ms = 50
-        first_speech_ms = None
-        for i in range(0, len(output_audio), chunk_ms):
-            chunk = output_audio[i:i + chunk_ms]
-            if chunk.dBFS > silence_threshold_db:
-                first_speech_ms = i
-                break
-
-        if first_speech_ms is not None:
-            first_speech_s = first_speech_ms / 1000.0
-        else:
-            first_speech_s = output_duration_s  # No speech detected
-
-        return {
-            "input_duration_s": round(input_duration_s, 3),
-            "output_duration_s": round(output_duration_s, 3),
-            "first_speech_s": round(first_speech_s, 3),
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# ==============================================================================
-# LiveKit Inference
-# ==============================================================================
-
-def run_livekit_inference(input_path, output_path, provider):
-    """
-    Stream input audio into a LiveKit room and record the agent's response
-    by calling livekit_inference.py as a subprocess.
-    """
-    import uuid
-    import subprocess
-
-    room_name = f"eval-{uuid.uuid4().hex[:8]}"
-    print(f"  🔗 Streaming via livekit_inference.py into room: {room_name}")
-
-    client_script = PROJECT_ROOT / "livekit_inference.py"
-    
-    try:
-        # Run the client script as a subprocess
-        result = subprocess.run(
-            [
-                sys.executable, str(client_script),
-                "-i", str(input_path),
-                "-o", str(output_path),
-                "--room", room_name
-            ],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        print(f"  ✅ livekit_inference.py finished successfully.")
-        
-        # Parse STREAM_START_TIME
-        stream_start_time = None
-        for line in result.stdout.splitlines():
-            if line.startswith("STREAM_START_TIME: "):
-                try:
-                    stream_start_time = float(line[19:])
-                except:
-                    pass
-                break
-        
-        return room_name, stream_start_time
-    except subprocess.CalledProcessError as e:
-        print(f"  ❌ livekit_inference.py failed with exit code {e.returncode}")
-        return None, None
-    except Exception as e:
-        print(f"  ❌ livekit_inference.py execution error: {e}")
-        return None, None
-
-
-# ==============================================================================
-# Search Verification
-# ==============================================================================
-
-def verify_search_answer(item, transcript):
-    """Verify a fast_search answer using evaluate_model_answers.py."""
-    try:
-        sys.path.insert(0, str(PROJECT_ROOT))
-        from evaluate_model_answers import evaluate_single
-        return evaluate_single(item, transcript)
-    except Exception as e:
-        return {"status": "error", "reason": str(e)}
 
 
 # ==============================================================================
@@ -347,7 +206,7 @@ def process_single(pid, example_id, input_path, provider, data, asr_model,
     input_asr = run_asr(asr_model, str(mono_path))
     result["input_transcript"] = input_asr["text"]
     result["input_asr_chunks"] = input_asr["chunks"]
-    
+
     # Find the end of speech for the first turn
     user_speech_end_rel = 0
     if input_asr["chunks"]:
@@ -361,14 +220,14 @@ def process_single(pid, example_id, input_path, provider, data, asr_model,
         else:
             # No large gap found, take the end of the last word
             user_speech_end_rel = input_asr["chunks"][-1]["timestamp"][1]
-    
+
     result["user_speech_end_rel"] = user_speech_end_rel
 
     # Step 4: Measure latency from audio
     print(f"  ⏱️  Measuring latency...")
     latency = measure_latency_from_audio(input_path, output_path)
     result["latency"] = latency
-    
+
     # Step 4.5: Calculate absolute total latency
     stream_start_time = result.get("stream_start_time")
     if stream_start_time and user_speech_end_rel:
@@ -393,7 +252,7 @@ def process_single(pid, example_id, input_path, provider, data, asr_model,
                                     existing = result.get("search_latency_breakdown", {})
                                     if metrics.get("execution", 0) > existing.get("execution", 0) or "total" not in existing:
                                         result["search_latency_breakdown"] = metrics
-                                        
+
                                         # Calculate absolute end-to-end latency if possible
                                         agent_start_at = metrics.get("agent_start_at")
                                         if agent_start_at and user_done_unix:
@@ -451,7 +310,7 @@ def process_single(pid, example_id, input_path, provider, data, asr_model,
                                 actual_tool_calls.append(call_data)
         except Exception as e:
             print(f"  ⚠️  Failed to extract tool calls from telemetry: {e}")
-            
+
     result["actual_tool_calls"] = actual_tool_calls
     result["status"] = "completed"
 
