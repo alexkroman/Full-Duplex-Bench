@@ -126,18 +126,56 @@ def discover_inputs(root_dir=None):
 # ==============================================================================
 
 def load_asr_model():
-    """Load NeMo ASR model."""
+    """Load the ASR model.
+
+    Default backend is NeMo parakeet (used for the paper's numbers). Set
+    ASR_BACKEND=whisper (with `pip install openai-whisper`) as a fallback on
+    machines where the NeMo/torch stack is hard to install — word timestamps
+    are supported either way, but transcripts will come from a different
+    model than the published results.
+    """
+    backend = os.getenv("ASR_BACKEND", "parakeet").lower()
+    if backend == "whisper":
+        import whisper
+        model_name = os.getenv("WHISPER_MODEL", "small.en")
+        print(f"🔊 Loading whisper ASR model ({model_name})...")
+        model = whisper.load_model(model_name)
+        print("✅ ASR model loaded (whisper)")
+        return {"backend": "whisper", "model": model}
+
     print("🔊 Loading ASR model...")
     import nemo.collections.asr as nemo_asr
     model = nemo_asr.models.ASRModel.from_pretrained(model_name=ASR_MODEL_NAME)
     if hasattr(model, 'cuda'):
-        model = model.cuda()
+        import torch
+        if torch.cuda.is_available():
+            model = model.cuda()
     print("✅ ASR model loaded")
     return model
 
 
 def run_asr(asr_model, audio_path):
     """Run ASR on an audio file and return transcript."""
+    if isinstance(asr_model, dict) and asr_model.get("backend") == "whisper":
+        try:
+            result = asr_model["model"].transcribe(str(audio_path), word_timestamps=True)
+            text = ""
+            chunks = []
+            for seg in result.get("segments", []):
+                for w in seg.get("words", []):
+                    word = w["word"].strip()
+                    if not word:
+                        continue
+                    text += word + " "
+                    chunks.append({
+                        "text": word,
+                        "timestamp": [round(w["start"], 3), round(w["end"], 3)],
+                    })
+            return {"text": text.strip(), "chunks": chunks}
+        except Exception as e:
+            print(f"  ❌ ASR error: {e}")
+            return {"text": "", "chunks": [], "error": str(e)}
+
     try:
         outputs = asr_model.transcribe([str(audio_path)], timestamps=True)
         if not outputs:
@@ -208,22 +246,32 @@ def measure_latency_from_audio(input_path, output_path, silence_threshold_db=-40
 
 
 # ==============================================================================
-# LiveKit Inference
+# Inference (LiveKit room or direct AAI host WebSocket)
 # ==============================================================================
+
+# Providers that connect directly to a local AAI voice-agent host instead of
+# going through a LiveKit room (no LiveKit credentials or agent process needed).
+AAI_HOST_PROVIDERS = {"aai"}
+
 
 def run_livekit_inference(input_path, output_path, provider):
     """
     Stream input audio into a LiveKit room and record the agent's response
-    by calling livekit_inference.py as a subprocess.
+    by calling livekit_inference.py (or aai_host_inference.py for the aai
+    provider) as a subprocess.
     """
     import uuid
     import subprocess
 
     room_name = f"eval-{uuid.uuid4().hex[:8]}"
-    print(f"  🔗 Streaming via livekit_inference.py into room: {room_name}")
 
-    client_script = PROJECT_ROOT / "livekit_inference.py"
-    
+    if provider in AAI_HOST_PROVIDERS:
+        client_script = PROJECT_ROOT / "aai_host_inference.py"
+        print(f"  🔗 Streaming via aai_host_inference.py, session: {room_name}")
+    else:
+        client_script = PROJECT_ROOT / "livekit_inference.py"
+        print(f"  🔗 Streaming via livekit_inference.py into room: {room_name}")
+
     try:
         # Run the client script as a subprocess
         result = subprocess.run(
@@ -237,8 +285,8 @@ def run_livekit_inference(input_path, output_path, provider):
             text=True,
             check=True
         )
-        print(f"  ✅ livekit_inference.py finished successfully.")
-        
+        print(f"  ✅ {client_script.name} finished successfully.")
+
         # Parse STREAM_START_TIME
         stream_start_time = None
         for line in result.stdout.splitlines():
@@ -248,13 +296,15 @@ def run_livekit_inference(input_path, output_path, provider):
                 except:
                     pass
                 break
-        
+
         return room_name, stream_start_time
     except subprocess.CalledProcessError as e:
-        print(f"  ❌ livekit_inference.py failed with exit code {e.returncode}")
+        print(f"  ❌ {client_script.name} failed with exit code {e.returncode}")
+        if e.stderr:
+            print(f"     {e.stderr.strip().splitlines()[-1]}")
         return None, None
     except Exception as e:
-        print(f"  ❌ livekit_inference.py execution error: {e}")
+        print(f"  ❌ {client_script.name} execution error: {e}")
         return None, None
 
 
@@ -308,7 +358,8 @@ def process_single(pid, example_id, input_path, provider, data, asr_model,
         if output_path.exists() and not force:
             print(f"  📦 Output already exists: {output_path.name}")
         else:
-            print(f"  🚀 Running LiveKit inference with provider={provider}...")
+            backend = "AAI host" if provider in AAI_HOST_PROVIDERS else "LiveKit"
+            print(f"  🚀 Running {backend} inference with provider={provider}...")
             inference_start = time.time()
             try:
                 room_name, stream_start_time = run_livekit_inference(input_path, output_path, provider)
@@ -466,13 +517,18 @@ def process_single(pid, example_id, input_path, provider, data, asr_model,
 def main():
     parser = argparse.ArgumentParser(description="Unified FDB-v3 evaluation pipeline")
     parser.add_argument("--provider", type=str, default=None,
-                        help="Model provider (gpt_realtime, grok, gemini2_5, etc.). Default: from .env.local")
+                        help="Model provider (gpt_realtime, grok, gemini2_5, aai, etc.). Default: from .env.local")
     parser.add_argument("--pid", type=str, help="Process only this participant ID")
     parser.add_argument("--example", type=str, help="Process only this example ID")
     parser.add_argument("--asr-only", action="store_true",
                         help="Skip inference, only re-run ASR + evaluation on existing outputs")
     parser.add_argument("--force", action="store_true", help="Overwrite existing results")
+    parser.add_argument("--asr-backend", type=str, default=None, choices=["parakeet", "whisper"],
+                        help="ASR backend (default: parakeet, or ASR_BACKEND env var)")
     args = parser.parse_args()
+
+    if args.asr_backend:
+        os.environ["ASR_BACKEND"] = args.asr_backend
 
     # Determine provider
     provider = args.provider or os.getenv("LK_PROVIDER", "gpt_realtime")

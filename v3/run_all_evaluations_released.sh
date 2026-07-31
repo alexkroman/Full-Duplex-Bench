@@ -9,18 +9,30 @@
 #
 # Usage:
 #   conda activate fdb
-#   bash run_all_evaluations_released.sh
-#   bash run_all_evaluations_released.sh --skip-existing
+#   bash run_all_evaluations_released.sh                    # all default providers
+#   bash run_all_evaluations_released.sh aai                # only the given provider(s)
+#   bash run_all_evaluations_released.sh aai --skip-existing
 
 set -e
 cd "$(dirname "$0")"
 
 BENCHMARK="benchmark_data_v2.json"
 RESULTS_DIR="fdb_v3_data_released"
-SKIP_FLAG="${1:-}"
 
-# Edit this list to include the providers you have run inference for:
-PROVIDERS=("gpt_realtime" "gemini2_5" "grok" "gemini3_1" "ultravox" "cascaded")
+# Providers can be passed as arguments; flags (--*) are forwarded to
+# analyze_tool_latency.py. With no provider arguments, the default list below
+# is used.
+PROVIDERS=()
+SKIP_FLAG=""
+for arg in "$@"; do
+    case "$arg" in
+        --*) SKIP_FLAG="$arg" ;;
+        *)   PROVIDERS+=("$arg") ;;
+    esac
+done
+if [ ${#PROVIDERS[@]} -eq 0 ]; then
+    PROVIDERS=("gpt_realtime" "gemini2_5" "grok" "gemini3_1" "ultravox" "cascaded" "aai")
+fi
 
 echo "============================================"
 echo "Multi-Step Tool Benchmark: All Evaluations"
