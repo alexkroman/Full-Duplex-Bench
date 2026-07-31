@@ -146,6 +146,19 @@ pip install websockets
 # 2. Start your AAI voice-agent host in a separate terminal
 #    (it should listen on ws://localhost:3100/websocket by default;
 #     set AAI_WS_URL in .env.local if it listens elsewhere)
+#
+#    Two host-side prerequisites:
+#      - Host mode is env-gated: start the host with AAI_ALLOW_HOST=1.
+#      - The host's own agent supplies the provider config. Host mode overrides
+#        only the system prompt, greeting, and tools, so to benchmark a
+#        cascaded pipeline the host's agent must declare all three of
+#        stt/llm/tts — otherwise the session falls back to speech-to-speech.
+#
+#    With the @alexkroman1/aai CLI that is:
+#      AAI_ALLOW_HOST=1 npx aai dev -p 3100
+#    run from an agent project whose agent.ts sets stt, llm, and tts. The
+#    host logs "Session mode resolved { mode: 'pipeline', ... }" on connect;
+#    check that line to confirm which transport you are measuring.
 
 # 3. Run inference with --provider aai (Step 2 below)
 ```
