@@ -106,6 +106,16 @@ STT_PROMPT = (
     "'P O 999', 'A B C 1 2 3' or 'E 7 7 2 2 1 1'. Transcribe every spoken "
     "identifier as one contiguous uppercase alphanumeric code and never omit it."
 )
+# Tried and reverted: extending STT_PROMPT to cover spoken passenger names
+# ("transcribe both parts in full, never let a following filler stand in for a
+# surname"). It does not help, because the loss is not a recognition failure the
+# prompt can bias. The AAI_DEBUG turn trace shows the service transcribing
+# "...should be Casey Lee. Oh, and I almost forgot" correctly in one interim and
+# then revising it to "...be Casey Oh, and I almost forgot" in the next — the
+# surname deleted and the following sentence's filler promoted in its place, so
+# book_flight books the wrong passenger. Same shape as the dropped order ID that
+# STT_PROMPT does fix, but here the prompt has no purchase: an interim already
+# had it right.
 
 # Flat function schemas (AAI host format: not nested under "function"),
 # mirroring the 12 tools defined in lk_agent_tool.py.
